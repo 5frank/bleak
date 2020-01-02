@@ -8,14 +8,50 @@ Created on 2019-06-24 by kevincar <kevincarrolldavis@gmail.com>
 
 """
 
+import logging
 import asyncio
 from asyncio.events import AbstractEventLoop
 from typing import List
+
+from plistlib import load as plist_load
 
 from bleak.backends.corebluetooth import CBAPP as cbapp
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 
+logger = logging.getLogger(__name__)
+
+async def __get_addr_from_CoreBluetoothCache():
+    
+    path = "/Library/Preferences/com.apple.Bluetooth.plist"
+    try:
+        with open(path, "rb") as f:
+            plist = plist_load(f)
+    except FileNotFoundError:
+        logger.warning("{} do not exist".format(path))
+        return {}
+
+    if "CoreBluetoothCache" not in plist:
+        logger.debug("No CoreBluetoothCache in {}".format(path))
+        return {}
+
+    cbcache = plist["CoreBluetoothCache"]  
+
+    if cbcache is None:
+        return {}
+
+    uuid_to_addr = {}
+
+    for devuuid, devinfo in cbcache.items():
+        if "DeviceAddress" not in devinfo:
+            continue
+
+        addr = devinfo["DeviceAddress"]
+        addr = addr.replace('-', ':')
+
+        uuid_to_addr[devuuid] = addr
+
+    return uuid_to_addr 
 
 async def discover(
     timeout: float = 5.0, loop: AbstractEventLoop = None, **kwargs
@@ -46,9 +82,15 @@ async def discover(
     found = []
 
     peripherals = cbapp.central_manager_delegate.peripheral_list
+    uuid_to_addr = await __get_addr_from_CoreBluetoothCache()
 
     for i, peripheral in enumerate(peripherals):
-        address = peripheral.identifier().UUIDString()
+        devuuid = peripheral.identifier().UUIDString()
+        if devuuid not in uuid_to_addr:
+            logger.warning("Missing DeviceAddress for device {}".format(devuuid))
+            continue # FIXME
+
+        address = uuid_to_addr[devuuid]
         name = peripheral.name() or "Unknown"
         details = peripheral
 
