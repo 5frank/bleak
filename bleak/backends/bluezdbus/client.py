@@ -171,9 +171,13 @@ class BleakClientBlueZDBus(BaseBleakClient):
             except Exception as e:
                 logger.error("Could not remove rule {0} ({1}): {2}".format(rule_id, rule_name, e))
         self._rules = {}
-        await asyncio.gather(
-            *(self.stop_notify(_uuid) for _uuid in self._subscriptions)
-        )
+        
+        for _uuid in self._subscriptions:
+            # after unexpected disconnect stop_notify() raises txdbus RemoteError.
+            try:
+                await self.stop_notify(_uuid)
+            except RemoteError as e:
+                logger.warning("Ignoring: {}".format(e))
 
     async def disconnect(self) -> bool:
         """Disconnect from the specified GATT server.
